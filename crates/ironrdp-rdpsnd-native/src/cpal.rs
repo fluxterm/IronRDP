@@ -18,7 +18,7 @@ pub struct RdpsndBackend {
     stream_handle: Option<JoinHandle<()>>,
     stream_ended: Arc<AtomicBool>,
     tx: Option<Sender<Vec<u8>>>,
-    format_no: Option<usize>,
+    format: Option<AudioFormat>,
 }
 
 impl Default for RdpsndBackend {
@@ -31,7 +31,7 @@ impl RdpsndBackend {
     pub fn new() -> Self {
         Self {
             tx: None,
-            format_no: None,
+            format: None,
             stream_handle: None,
             stream_ended: Arc::new(AtomicBool::new(false)),
         }
@@ -69,8 +69,8 @@ impl RdpsndClientHandler for RdpsndBackend {
         ]
     }
 
-    fn wave(&mut self, format_no: usize, _ts: u32, data: Cow<'_, [u8]>) {
-        if Some(format_no) != self.format_no {
+    fn wave(&mut self, _format_no: usize, format: &AudioFormat, _ts: u32, data: Cow<'_, [u8]>) {
+        if self.format.as_ref() != Some(format) {
             debug!("New audio format");
             self.close();
         }
@@ -79,11 +79,7 @@ impl RdpsndClientHandler for RdpsndBackend {
             let (tx, rx) = mpsc::channel();
             self.tx = Some(tx);
 
-            self.format_no = Some(format_no);
-            let Some(format) = self.get_formats().get(format_no) else {
-                warn!(?format_no, "Invalid format_no");
-                return;
-            };
+            self.format = Some(format.clone());
             let format = format.clone();
             self.stream_ended.store(false, Ordering::Relaxed);
             let stream_ended = Arc::clone(&self.stream_ended);
@@ -121,6 +117,7 @@ impl RdpsndClientHandler for RdpsndBackend {
 
     fn close(&mut self) {
         self.tx = None;
+        self.format = None;
         if let Some(stream) = self.stream_handle.take() {
             self.stream_ended.store(true, Ordering::Relaxed);
             stream.thread().unpark();

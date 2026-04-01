@@ -1,7 +1,8 @@
 use std::borrow::Cow;
+use std::sync::{Arc, Mutex};
 
 use ironrdp_core::{decode, encode_vec};
-use ironrdp_rdpsnd::client::{NoopRdpsndBackend, Rdpsnd};
+use ironrdp_rdpsnd::client::{NoopRdpsndBackend, Rdpsnd, RdpsndClientHandler};
 use ironrdp_rdpsnd::pdu;
 use ironrdp_svc::SvcProcessor as _;
 use rstest::rstest;
@@ -280,4 +281,62 @@ fn stop_ignores_all_pdus(#[case] payload: Vec<u8>) {
 
     let responses = client.process(&payload).unwrap();
     assert!(responses.is_empty(), "Stop state should ignore all PDUs");
+}
+
+#[derive(Debug, Default, Clone)]
+struct RecordingBackend {
+    supported_formats: Vec<pdu::AudioFormat>,
+    observed_format: Arc<Mutex<Option<pdu::AudioFormat>>>,
+}
+
+impl RdpsndClientHandler for RecordingBackend {
+    fn get_formats(&self) -> &[pdu::AudioFormat] {
+        &self.supported_formats
+    }
+
+    fn wave(&mut self, _format_no: usize, format: &pdu::AudioFormat, _ts: u32, _data: Cow<'_, [u8]>) {
+        *self.observed_format.lock().unwrap() = Some(format.clone());
+    }
+
+    fn set_volume(&mut self, _volume: pdu::VolumePdu) {}
+
+    fn set_pitch(&mut self, _pitch: pdu::PitchPdu) {}
+
+    fn close(&mut self) {}
+}
+
+#[test]
+fn wave2_uses_negotiated_client_format_order() {
+    let backend = RecordingBackend {
+        supported_formats: vec![
+            pdu::AudioFormat {
+                format: pdu::WaveFormat::PCM,
+                n_channels: 2,
+                n_samples_per_sec: 48_000,
+                n_avg_bytes_per_sec: 192_000,
+                n_block_align: 4,
+                bits_per_sample: 16,
+                data: None,
+            },
+            pdu::AudioFormat {
+                format: pdu::WaveFormat::PCM,
+                n_channels: 2,
+                n_samples_per_sec: 44_100,
+                n_avg_bytes_per_sec: 176_400,
+                n_block_align: 4,
+                bits_per_sample: 16,
+                data: None,
+            },
+        ],
+        observed_format: Arc::new(Mutex::new(None)),
+    };
+    let observed_format = Arc::clone(&backend.observed_format);
+    let mut client = Rdpsnd::new(Box::new(backend));
+
+    client.process(&encoded_server_formats(pdu::Version::V8)).unwrap();
+    client.process(&encoded_training()).unwrap();
+    client.process(&encoded_wave2(0)).unwrap();
+
+    let observed = observed_format.lock().unwrap().clone().unwrap();
+    assert_eq!(observed.n_samples_per_sec, 44_100);
 }

@@ -17,7 +17,9 @@ pub trait RdpsndClientHandler: Send + core::fmt::Debug {
 
     fn get_formats(&self) -> &[AudioFormat];
 
-    fn wave(&mut self, format_no: usize, ts: u32, data: Cow<'_, [u8]>);
+    fn ready(&mut self) {}
+
+    fn wave(&mut self, format_no: usize, format: &AudioFormat, ts: u32, data: Cow<'_, [u8]>);
 
     fn set_volume(&mut self, volume: VolumePdu);
 
@@ -34,7 +36,7 @@ impl RdpsndClientHandler for NoopRdpsndBackend {
         &[]
     }
 
-    fn wave(&mut self, _format_no: usize, _ts: u32, _data: Cow<'_, [u8]>) {}
+    fn wave(&mut self, _format_no: usize, _format: &AudioFormat, _ts: u32, _data: Cow<'_, [u8]>) {}
 
     fn set_volume(&mut self, _volume: VolumePdu) {}
 
@@ -59,6 +61,7 @@ pub struct Rdpsnd {
     handler: Box<dyn RdpsndClientHandler>,
     state: RdpsndState,
     server_format: Option<ServerAudioFormatPdu>,
+    client_formats: Option<Vec<AudioFormat>>,
 }
 
 impl Rdpsnd {
@@ -69,17 +72,17 @@ impl Rdpsnd {
             handler,
             state: RdpsndState::Start,
             server_format: None,
+            client_formats: None,
         }
     }
 
     pub fn get_format(&self, format_no: u16) -> PduResult<&AudioFormat> {
-        let server_format = self
-            .server_format
+        let client_formats = self
+            .client_formats
             .as_ref()
             .ok_or_else(|| pdu_other_err!("invalid state - no format"))?;
 
-        server_format
-            .formats
+        client_formats
             .get(usize::from(format_no))
             .ok_or_else(|| pdu_other_err!("invalid format"))
     }
@@ -103,8 +106,14 @@ impl Rdpsnd {
             .formats
             .iter()
             .collect();
-        let formats: HashSet<_> = self.handler.get_formats().iter().collect();
-        let formats = formats.intersection(&server_format).map(|&x| x.clone()).collect();
+        let formats: Vec<_> = self
+            .handler
+            .get_formats()
+            .iter()
+            .filter(|format| server_format.contains(format))
+            .cloned()
+            .collect();
+        self.client_formats = Some(formats.clone());
 
         let pdu = pdu::ClientAudioFormatPdu {
             version: self.version()?,
@@ -187,6 +196,7 @@ impl SvcProcessor for Rdpsnd {
                     return Ok(vec![]);
                 };
                 self.state = RdpsndState::Ready;
+                self.handler.ready();
                 self.training_confirm(&pdu)?.into()
             }
             RdpsndState::Ready => {
@@ -195,7 +205,8 @@ impl SvcProcessor for Rdpsnd {
                     pdu::ServerAudioOutputPdu::Wave2(pdu) => {
                         let format_no = usize::from(pdu.format_no);
                         let ts = pdu.audio_timestamp;
-                        self.handler.wave(format_no, ts, pdu.data);
+                        let format = self.get_format(pdu.format_no)?.clone();
+                        self.handler.wave(format_no, &format, ts, pdu.data);
                         return Ok(self.wave_confirm(pdu.timestamp, pdu.block_no)?.into());
                     }
                     pdu::ServerAudioOutputPdu::Volume(pdu) => {
