@@ -209,3 +209,9 @@ opt-level = 3
 # FIXME: We need to catch up with Diplomat upstream again, but this is a significant amount of work.
 # In the meantime, we use this forked version which fixes an undefined behavior in the code expanded by the bridge macro.
 diplomat = { git = "https://github.com/CBenoit/diplomat", rev = "6dc806e80162b6b39509a04a2835744236cd2396" }
+sspi = { version = "0.21", git = "https://github.com/fluxterm/sspi-rs", branch = "fix/rustcrypto-rc0-russh-061" }
+picky = { version = "=7.0.0-rc.23", git = "https://github.com/fluxterm/picky-rs", branch = "fix/rustcrypto-rc0-russh-061" }
+picky-asn1 = { version = "0.10", git = "https://github.com/fluxterm/picky-rs", branch = "fix/rustcrypto-rc0-russh-061" }
+picky-asn1-der = { version = "0.5", git = "https://github.com/fluxterm/picky-rs", branch = "fix/rustcrypto-rc0-russh-061" }
+picky-asn1-x509 = { version = "0.15", git = "https://github.com/fluxterm/picky-rs", branch = "fix/rustcrypto-rc0-russh-061" }
+picky-krb = { version = "0.12", git = "https://github.com/fluxterm/picky-rs", branch = "fix/rustcrypto-rc0-russh-061" }
